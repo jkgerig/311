@@ -25,51 +25,87 @@ Other nice to have features:
   that stay open the longest, etc)
 
 
+## prerequisites
+
+Download and install Python and Node.js. The links for the download pages are listed below.
+
+* https://www.python.org/downloads/
+* https://nodejs.org/en/download/current/
+
 ## database setup
 
 First you need to install PostgreSQL and PostGIS.
 
-Once those are available, if you use `bash`, you can just run the `setup.sh`
-script.
+Once those are available, you can run the `setup.sh` script:
 
 ```
 ./setup.sh
 ```
 
-If not, you can run the commands below to get the 311 data into your database.
+If you are loading the data into a remote database, use environment variables
+to tell the script where to load:
 
 ```
-# identify where to save the two data files
-call_data_file="./nola311_raw.csv"
-neighborhood_areas_file="./neighborhood_areas.geo.json"
-
-# create the db
-createuser nola311
-createdb nola311 -O nola311
-
-# download the source data
-/usr/local/bin/wget --show-progress -O "$call_data_file" "https://data.nola.gov/api/views/3iz8-nghx/rows.csv?accessType=DOWNLOAD"
-/usr/local/bin/wget --show-progress -O "$neighborhood_areas_file" "http://portal.nolagis.opendata.arcgis.com/datasets/e7daa4c977d14e1b9e2fa4d7aff81e59_0.geojson"
-
-# create the table and import the data from the csv
-psql --set=call_data_file="$call_data_file" --set=neighborhood_areas_file="$neighborhood_areas_file" -U postgres -d nola311 -f setup/schema_and_csv_import.sql
-
-# sanitize the table
-psql -U nola311 -d nola311 -f setup/sanitize.sql
-
-# create views
-psql -U nola311 -d nola311 -f views/open_tickets_stats.sql
-psql -U nola311 -d nola311 -f views/closed_tickets_stats.sql
-psql -U nola311 -d nola311 -f views/call_records_for_review.sql
-psql -U nola311 -d nola311 -f views/call_records_with_call_for_details.sql
+NOLA311_DB_USER=nola311 \
+  NOLA311_DB_NAME=nola311 \
+  NOLA311_DB_HOST=c2rp0kujqp.us-east-1.rds.amazonaws.com \
+  NOLA311_DB_PORT=5432 \
+  ./setup.sh
 ```
 
-## some sample queries
+## app setup
+
+This app uses Docker for deployment configuration.
+
+To setup for development, first ensure you have the following environment variables available. Some good assumptions for local development (assuming you followed the database setup instructions above) for each are included for your copy-paste pleasure.
+
+```
+export NOLA311_DB_HOST=localhost
+export NOLA311_DB_PORT=5432
+export NOLA311_DB_NAME=nola311
+export NOLA311_DB_USER=nola311
+export NOLA311_DB_PASSWORD=
+```
+
+After you make changes to the code, you can do the following:
+```
+docker-compose build
+docker-compose up
+```
+
+Once complete, the app will be available on port `3000`, and logs should display in the command-line terminal.
+
+If you're using Docker Toolbox, this will be on your `docker-machine` IP address, which you can get via `docker-machine ip default` or `docker-machine ip dev`.
+
+If you're on Docker for Mac, this will be on `localhost`.
+
+## some sample queries on the database
+
+Login to the db with psql `psql -h localhost -U nola311` and run some queries:
 
 ```sql
 -- what are the top issues that people call about?
-select issue_type, count(*) as num_calls from nola311.calls group by issue_type order by num_calls desc;
+select issue_type, count(*) as num_calls
+from nola311.calls
+group by issue_type
+order by num_calls desc;
 
 -- which council district has the most calls?
-select council_district, count(*) as num_calls from nola311.calls group by council_district order by num_calls desc;
+select council_district, count(*) as num_calls
+from nola311.calls
+group by council_district
+order by num_calls desc;
+
+-- how many pothole calls have been opened and closed this year?
+select ticket_status, count(*) as total
+from nola311.calls
+where issue_type = 'Pothole/Roadway Surface Repair'
+  and ticket_created_date_time >= '2017-01-01'::date
+group by ticket_status;
+
+--- dont forget to checkout the views
+select *
+from open_tickets_stats
+where issue_type = 'Catch Basin Maintenance'
+  and year_created = '2017';
 ```
